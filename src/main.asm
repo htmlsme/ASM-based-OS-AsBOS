@@ -1,75 +1,103 @@
-org 0x7c00 ; Offsetting to 31744 hexadecimal
-bits 16 ; setting bits to 16 (for the compiler)
-
-jmp main
-
-msg: db "Detecting memory..." ; Message to print to the screen
-endmsg:
+[BITS 16]
+[ORG 0x7c00]
 
 
-main:
-  mov bx, 0x000F ; set to page 0 and color 15 for white
-  mov cx, 1 ; Setting to write 1 character
-  xor dx, dx ; start at the top left of the screen
-  mov ds, dx ; set ds to 0 to let us load the Message
-  cld ; ensure direction flag is cleared
 
-print: mov si, msg ; move the first letter into 0x7c02
 
-char:
-  mov ah, 2 ; move 2 into ah to set cursor
-  int 0x10
-  lodsb ; load string byte
+CODE_OFFSET equ 0x8
 
-  mov ah, 9 ; print character and color
-  int 0x10
+DATA_OFFSET equ 0x10
 
-  inc dl ; advance cursor
 
-  cmp dl, 80 ; wrap around the screen if needed
-  jne skip
-  xor dl, dl ; set cursor to top left
-  inc dh ; obviously increment dh
 
-  cmp dh, 25 ; wrap around bottom of screen if needed
-  jne skip
-  xor dh, dh ; set dh to zero
 
-skip:
-  cmp si, endmsg
-  jne char
-  jmp .done
 
-.done:
-  xor dx, dx ; All of this is just clearing
+jmp SetStack
+
+SetStack:
+  cli
   xor ax, ax
-  xor cx, cx
-  xor dx, dx
-  xor dh, dh
-  xor dl, dl
-  xor ds, ds
-  xor si, si
-  jmp detect_mem
+  mov ds, ax
+  mov es, ax
+  mov ss, ax ; sp:ss for stack
+  mov sp, 0x7c00
+  sti
 
-detect_mem:
-  clc ; clear carry flag
-  int 0x12 ; detect up to a MiB of memory (usually 640KiB)
-  jc .error ; checking for error
-  mov dx, ax ; mov ax to a different general purpose register
-  xor ax, ax ; clear ax
-  jmp .loop
+mov bx, KERNEL_LOAD_SEG
+mov dh, 0x00
+mov dl, 0x80
+mov cl, 0x02
+mov ch, 0x00
+mov ah, 0x02
+mov al, 8 
 
-.error:
+in 0x13
+
+jc disk_read_error
+
+
+
+
+
+
+
+load_PM:
+  cli
+  lgdt[GDT_descriptor]
+  mov eax, cr0
+  or al, 1
+  mov cro, eax
+  jmp CODE_OFFSET:PMMain
+
+disk_read_error:
   cli
   hlt
-  jmp .error
+  jmp disk_read_error
 
-.loop:
-  cli
-  hlt
-  jmp .loop
 
-jmp $
+GDT_start:
+  dd 0x00000000 ; null descriptor
+  dd 0x00000000
+  
+  ; code seg descriptor
+  dw 0xFFFF ; limit
+  dw 0x0000 ; base
+  db 0x00 ; base
+  db 10011010b ; access byte
+  db 11001111b ; flags
+  db 0x00 ; base
+
+  ; data seg descriptor
+  dw 0xFFFF ; limit
+  dw 0x0000 ; base
+  db 0x00 ; base
+  db 10010010b ; access byte
+  db 11001111b ; flags
+  db 0x00 ; base
+
+  GDT_end:
+  
+  GDT_descriptor:
+    dw GDT_end - GDT_start - 1 ; size of gdt - 1
+    dd GDT_start
+
+[BITS 32]
+
+PMMain:
+  mov ax, DATA_OFFSET
+  mov ds, ax
+  mov es, ax
+  mov fs, ax
+  mov ss, ax
+  mov gs, ax
+  mov ebp, 0x9c00
+  mov esp, ebp
+
+  in al, 0x92
+  or al, 2
+  out 0x92, al
+
+  jmp CODE_OFFSET:KERNEL_START_ADDR
 
 times 510-($-$$) db 0 ; fill the empty space with 0
-dw 0xAA55 ; what the legacy bios looks for to see if a disk is bootable
+dw 0xAA55 ; what the legacy bios lo:wqoks for to see if a disk is bootable
